@@ -63,7 +63,7 @@ static int hook_install(struct ftrace_hook *hook)
     return 0;
 }
 
-#if 0
+//#if 0
 void hook_remove(struct ftrace_hook *hook)
 {
     int err = unregister_ftrace_function(&hook->ops);
@@ -73,7 +73,7 @@ void hook_remove(struct ftrace_hook *hook)
     if (err)
         printk("ftrace_set_filter_ip() failed: %d\n", err);
 }
-#endif
+//#endif
 
 typedef struct {
     pid_t id;
@@ -90,7 +90,7 @@ static struct ftrace_hook hook;
 static bool is_hidden_proc(pid_t pid)
 {
     pid_node_t *proc, *tmp_proc;
-    list_for_each_entry_safe (proc, tmp_proc, &hidden_proc, list_node) {   
+    list_for_each_entry_safe (proc, tmp_proc, &hidden_proc, list_node) { ///AAA答案  
         if (proc->id == pid)
             return true;
     }
@@ -118,15 +118,15 @@ static int hide_process(pid_t pid)
 {
     pid_node_t *proc = kmalloc(sizeof(pid_node_t), GFP_KERNEL);
     proc->id = pid;
-    list_add_tail(&proc->list_node, &hidden_proc);
+    list_add_tail(&proc->list_node, &hidden_proc);//CCC答案
     return SUCCESS;
 }
 
 static int unhide_process(pid_t pid)
 {
     pid_node_t *proc, *tmp_proc;
-    list_for_each_entry_safe (proc, tmp_proc, &hidden_proc, list_node) {
-        list_del(&proc->list_node);
+    list_for_each_entry_safe (proc, tmp_proc, &hidden_proc, list_node) {//BBB答案
+        list_del(&proc->list_node);//DDD答案
         kfree(proc);
     }
     return SUCCESS;
@@ -177,15 +177,15 @@ static ssize_t device_write(struct file *filep,
     if (len < sizeof(add_message) - 1 && len < sizeof(del_message) - 1)
         return -EAGAIN;
 
-    message = kmalloc(len + 1, GFP_KERNEL);
+    message = kmalloc(len + 1, GFP_KERNEL);//GFP_KERNEL說明請看 https://blog.xuite.net/kerkerker2013/wretch/113322033
     memset(message, 0, len + 1);
-    copy_from_user(message, buffer, len);
-    if (!memcmp(message, add_message, sizeof(add_message) - 1)) {
-        kstrtol(message + sizeof(add_message), 10, &pid);
-        hide_process(pid);
-    } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {
+    copy_from_user(message, buffer, len);//buffer取出資料，放到message，而buffer 來自輸入變數 const char *buffer
+    if (!memcmp(message, add_message, sizeof(add_message) - 1)) {//比較字串是否為 "add"
+        kstrtol(message + sizeof(add_message), 10, &pid);//kstrtol()為將字串轉成 long 整數  https://www.kernel.org/doc/htmldocs/kernel-api/API-kstrtol.html
+        hide_process(pid);//作業問的內容 將取到的數字 隱藏此PID數字
+    } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {//比較字串是否為 "del"
         kstrtol(message + sizeof(del_message), 10, &pid);
-        unhide_process(pid);
+        unhide_process(pid);//作業問的內容 將取到的數字 回復顯示此PID數字
     } else {
         kfree(message);
         return -EAGAIN;
@@ -210,21 +210,29 @@ static const struct file_operations fops = {
 #define MINOR_VERSION 1
 #define DEVICE_NAME "hideproc"
 
+//可以用 cat sys/class  查詢 掛載前後 有無 hideproc 目錄
+//用 cat  /dev 查詢 掛載前後 有無 hideproc 目錄
+// #define MKDEV(ma,mi)  
+// MKDEV ，用於將主設備號和次設備號合成一個設備號，
+//主設備可以通過查閱內核源碼的Documentation/devices.txt文件，而次設備號通常是從編號0開始。
+// http://doc.embedfire.com/linux/imx6/base/zh/latest/linux_driver/character_device.html#id5
+
+dev_t dev; //改成全域變數，才能在 _hideproc_exit(void)時
+            //獲取主 device numbers        
 static int _hideproc_init(void)
 {
-    int err, dev_major;
-    dev_t dev;
+    int err, dev_major;   
     printk(KERN_INFO "@ %s\n", __func__);
-    err = alloc_chrdev_region(&dev, 0, MINOR_VERSION, DEVICE_NAME);
-    dev_major = MAJOR(dev);
+    err = alloc_chrdev_region(&dev, 0, MINOR_VERSION, DEVICE_NAME);//alloc_chrdev_region()申請一個 char device numbers(字元設備號碼)
+    dev_major = MAJOR(dev);//獲取主 device numbers
 
-    hideproc_class = class_create(THIS_MODULE, DEVICE_NAME);
-
-    cdev_init(&cdev, &fops);
-    cdev_add(&cdev, MKDEV(dev_major, MINOR_VERSION), 1);
+    hideproc_class = class_create(THIS_MODULE, DEVICE_NAME);//class_create(owner, name)在 sys/class/ 目錄下 創建一個class,
+															
+    cdev_init(&cdev, &fops);//初始化cdev
+    cdev_add(&cdev, MKDEV(dev_major, MINOR_VERSION), 1);//cdev_add()向系統註冊設備
     device_create(hideproc_class, NULL, MKDEV(dev_major, MINOR_VERSION), NULL,
-                  DEVICE_NAME);
-
+                  DEVICE_NAME);//創建一個設備(在/dev目錄下創建設備文件)，並註冊到sysfs
+								//因為我們寫 DEVICE_NAME "hideproc"，所以會創建在 /dev/hideproc 目錄
     init_hook();
 
     return 0;
@@ -234,6 +242,11 @@ static void _hideproc_exit(void)
 {
     printk(KERN_INFO "@ %s\n", __func__);
     /* FIXME: ensure the release of all allocated resources */
+    hook_remove(&hook); //移除 ftrace hook 
+    device_destroy(hideproc_class, MKDEV(MAJOR(dev), 1));//刪除使用device_create函數創建的設備        
+    class_destroy(hideproc_class);
+    cdev_del(&cdev);//註銷設備
+    unregister_chrdev_region(dev, MINOR_VERSION);//釋放設備號 
 }
 
 module_init(_hideproc_init);
