@@ -165,6 +165,8 @@ static ssize_t device_read(struct file *filep,
     return *offset;
 }
 
+//使用 strsep 搜尋字串" "位置
+// https://xiwan.io/archive/string-split-strtok-strtok-r-strsep.html
 static ssize_t device_write(struct file *filep,
                             const char *buffer,
                             size_t len,
@@ -172,8 +174,8 @@ static ssize_t device_write(struct file *filep,
 {
     long pid;
     char *message;
-
-    char add_message[] = "add", del_message[] = "del";
+    char *ch_index; 
+    char add_message[] = "add", del_message[] = "del",space_message[]=" ";
     if (len < sizeof(add_message) - 1 && len < sizeof(del_message) - 1)
         return -EAGAIN;
 
@@ -181,16 +183,23 @@ static ssize_t device_write(struct file *filep,
     memset(message, 0, len + 1);
     copy_from_user(message, buffer, len);//buffer取出資料，放到message，而buffer 來自輸入變數 const char *buffer
     if (!memcmp(message, add_message, sizeof(add_message) - 1)) {//比較字串是否為 "add"
-        kstrtol(message + sizeof(add_message), 10, &pid);//kstrtol()為將字串轉成 long 整數  https://www.kernel.org/doc/htmldocs/kernel-api/API-kstrtol.html
-        hide_process(pid);//作業問的內容 將取到的數字 隱藏此PID數字
+        ch_index = strsep(&message, space_message);//跳過"add"
+	while((ch_index = strsep(&message, space_message))){
+		kstrtol(ch_index, 10, &pid);//kstrtol()為將字串轉成 long 整數，解析字串從第 ch_index 格 位置開始，其中10代表轉成10進位   https://www.kernel.org/doc/htmldocs/kernel-api/API-kstrtol.html
+		hide_process(pid);//作業問的內容 將取到的數字 隱藏此PID數字					
+	}
+
     } else if (!memcmp(message, del_message, sizeof(del_message) - 1)) {//比較字串是否為 "del"
-        kstrtol(message + sizeof(del_message), 10, &pid);
-        unhide_process(pid);//作業問的內容 將取到的數字 回復顯示此PID數字
+        ch_index = strsep(&message, space_message);//跳過"del"
+	while((ch_index = strsep(&message, space_message))){
+		kstrtol(ch_index, 10, &pid);//kstrtol()為將字串轉成 long 整數，解析字串從第 ch_index 格 位置開始
+		unhide_process(pid);//作業問的內容 將取到的數字 回復顯示此PID數字
+	}
+		
     } else {
         kfree(message);
         return -EAGAIN;
     }
-
     *offset = len;
     kfree(message);
     return len;
